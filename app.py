@@ -6,12 +6,20 @@ import os
 from datetime import datetime, date, timedelta
 import calendar
 import numpy as np
+import auth
 
 st.set_page_config(page_title="Paisa Tracker 💰", page_icon="💰", layout="wide", initial_sidebar_state="expanded")
 
-DATA_DIR    = "."
-SETUP_FILE  = "setup.csv"
-BUDGET_FILE = "budget_rules.csv"
+# ── Auth gate ──────────────────────────────────────────────────────────────────
+# Blocks here with a login/signup form until the visitor is authenticated.
+# Everything below this line is the original app, unchanged, except that
+# DATA_DIR/SETUP_FILE/BUDGET_FILE now point at this user's own folder.
+CURRENT_USER = auth.require_login()
+
+DATA_DIR    = os.path.join("data", CURRENT_USER)
+os.makedirs(DATA_DIR, exist_ok=True)
+SETUP_FILE  = os.path.join(DATA_DIR, "setup.csv")
+BUDGET_FILE = os.path.join(DATA_DIR, "budget_rules.csv")
 COLS        = ["Date","Description","Category","Amount","Payment Mode","Type","Notes"]
 
 CATEGORIES  = ["Life Infrastructure","Lifestyle Enjoyment","Performance & Growth","Relationships & Generosity","Future Me"]
@@ -83,8 +91,10 @@ def available_years():
     return sorted(yrs)
 
 @st.cache_data(ttl=1)
-def load_year(year):
-    fp = year_file(year)
+def _load_year_cached(year, data_dir):
+    # data_dir is part of the cache key (along with year) so that two users
+    # requesting the same year at the same moment never share a cached frame.
+    fp = os.path.join(data_dir, f"expenses_{int(year)}.csv")
     empty = pd.DataFrame(columns=COLS)
     empty["Date"]   = pd.to_datetime(empty["Date"])
     empty["Amount"] = pd.to_numeric(empty["Amount"], errors="coerce")
@@ -101,9 +111,12 @@ def load_year(year):
             return empty
     return empty
 
+def load_year(year):
+    return _load_year_cached(year, DATA_DIR)
+
 def save_year(df, year):
     df.to_csv(year_file(year), index=False)
-    load_year.clear()
+    _load_year_cached.clear()
 
 def load_all_years():
     frames = [load_year(y) for y in available_years()]
@@ -112,7 +125,7 @@ def load_all_years():
 def delete_year_data(year):
     fp = year_file(year)
     if os.path.exists(fp): os.remove(fp)
-    load_year.clear()
+    _load_year_cached.clear()
 
 def delete_month_data(year, month_num):
     df = load_year(year)
@@ -182,6 +195,7 @@ def score_calc(df_month, salary, needs_pct=50, wants_pct=30, savings_pct=20):
 with st.sidebar:
     st.markdown('<div class="app-title">💰 Paisa Tracker</div>', unsafe_allow_html=True)
     st.caption("Your personal finance companion")
+    auth.logout_button(st.sidebar)
     st.divider()
     st.markdown("### 🗕 Quick Filter")
     setup_df = load_setup()
